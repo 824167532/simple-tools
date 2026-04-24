@@ -1,0 +1,1500 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.5, user-scalable=yes, viewport-fit=cover">
+    <title>数据工作台 · 稳定修复版</title>
+    <!-- 主线程加载 XLSX 与 JSZip，Worker 会通过 importScripts 再次加载 XLSX -->
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js">
+    </script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js">
+    </script>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+        }
+
+        body {
+            background: #f3f7fd;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            padding: 12px 8px;
+        }
+
+        .workbench {
+            max-width: 1400px;
+            width: 100%;
+            background: #fff;
+            border-radius: 24px;
+            box-shadow: 0 8px 24px rgba(0, 20, 50, 0.06);
+            border: 1px solid #e2ebf6;
+            overflow: hidden;
+        }
+
+        .tab-nav {
+            display: flex;
+            gap: 4px;
+            padding: 16px 16px 0;
+            border-bottom: 1px solid #dfeaf5;
+            background: #fafdff;
+            overflow-x: auto;
+        }
+
+        .tab-btn {
+            background: transparent;
+            border: none;
+            padding: 12px 18px;
+            font-size: 1rem;
+            font-weight: 500;
+            color: #5e7891;
+            cursor: pointer;
+            border-radius: 16px 16px 0 0;
+            border: 1px solid transparent;
+            border-bottom: none;
+            white-space: nowrap;
+        }
+
+        .tab-btn.active {
+            background: white;
+            color: #1f4fcf;
+            border-color: #dfeaf5;
+            border-bottom: 2px solid white;
+        }
+
+        .panel-container {
+            padding: 16px 14px 20px;
+        }
+
+        @media (min-width: 640px) {
+            .panel-container {
+                padding: 28px 28px 32px;
+            }
+        }
+
+        .function-panel {
+            display: none;
+        }
+
+        .function-panel.active {
+            display: block;
+            min-height: 0;
+        }
+
+        .panel-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 12px;
+        }
+
+        .panel-header h3 {
+            font-weight: 600;
+            font-size: 1.3rem;
+            color: #1a304c;
+        }
+
+        .badge {
+            background: #e6eefc;
+            color: #1f4f9e;
+            padding: 4px 12px;
+            border-radius: 40px;
+            font-size: 0.75rem;
+            white-space: nowrap;
+        }
+
+        .desc {
+            color: #5e7891;
+            margin-bottom: 18px;
+            font-size: 0.85rem;
+            border-left: 3px solid #7aa5e6;
+            padding-left: 14px;
+        }
+
+        .upload-zone {
+            background: #fafdff;
+            border: 2px dashed #c0d4ec;
+            border-radius: 20px;
+            padding: 20px 12px;
+            text-align: center;
+            cursor: pointer;
+            margin-bottom: 16px;
+        }
+
+        .upload-symbol {
+            font-size: 32px;
+            margin-bottom: 4px;
+        }
+
+        .upload-title {
+            font-weight: 600;
+            color: #1e3a6f;
+            font-size: 1rem;
+        }
+
+        .upload-hint {
+            color: #6b89a8;
+            font-size: 0.8rem;
+            margin-top: 6px;
+        }
+
+        .file-input {
+            display: none;
+        }
+
+        .file-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin: 10px 0 8px;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .file-stats {
+            background: #e2eaf5;
+            padding: 4px 14px;
+            border-radius: 30px;
+            font-size: 0.8rem;
+        }
+
+        .btn {
+            background: white;
+            border: 1px solid #cbdaea;
+            padding: 8px 14px;
+            border-radius: 40px;
+            font-weight: 500;
+            font-size: 0.8rem;
+            color: #25415d;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            white-space: nowrap;
+        }
+
+        .btn-primary {
+            background: #1f4fcf;
+            border-color: #1f4fcf;
+            color: white;
+        }
+
+        .file-items {
+            background: #f9fcff;
+            border-radius: 16px;
+            padding: 8px 14px;
+            margin: 12px 0 16px;
+            max-height: 220px;
+            overflow-y: auto;
+            border: 1px solid #dde9f5;
+        }
+
+        .file-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 8px;
+            margin: 4px 0;
+            border-bottom: 1px solid #e4ecf5;
+            background: white;
+            border-radius: 8px;
+            user-select: none;
+            gap: 8px;
+        }
+
+        .file-row.draggable {
+            cursor: grab;
+        }
+
+        .file-row.draggable:active {
+            cursor: grabbing;
+        }
+
+        .file-row.drag-over {
+            background: #e6f0ff;
+            outline: 2px dashed #1f4fcf;
+            outline-offset: -2px;
+        }
+
+        .file-info {
+            font-weight: 500;
+            color: #1f3e62;
+            font-size: 0.85rem;
+            flex: 1;
+            pointer-events: none;
+        }
+
+        .remove-btn {
+            background: none;
+            border: none;
+            color: #8fa6c2;
+            font-size: 1.3rem;
+            padding: 0 4px;
+            cursor: pointer;
+            pointer-events: auto;
+        }
+
+        .file-actions {
+            display: flex;
+            gap: 4px;
+            align-items: center;
+        }
+
+        .move-btn {
+            background: none;
+            border: 1px solid #cbdaea;
+            border-radius: 6px;
+            font-size: 1rem;
+            padding: 2px 6px;
+            color: #5e7891;
+            cursor: pointer;
+            pointer-events: auto;
+        }
+
+        .options-row {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 12px 16px;
+            margin: 12px 0;
+            background: #f5f9fe;
+            padding: 10px 14px;
+            border-radius: 30px;
+        }
+
+        .clean-panel {
+            background: #f5faff;
+            border-radius: 18px;
+            padding: 14px 14px;
+            margin: 14px 0 10px;
+            border: 1px solid #d6e4f5;
+        }
+
+        .clean-options {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 12px 18px;
+            margin-bottom: 8px;
+        }
+
+        .clean-check {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 0.85rem;
+            white-space: nowrap;
+        }
+
+        .row-range-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin-top: 8px;
+        }
+
+        .row-range-control {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .row-range-control input {
+            width: 70px;
+            padding: 6px 8px;
+            border-radius: 20px;
+            border: 1px solid #bccfe2;
+        }
+
+        .preview-wrapper {
+            border-radius: 16px;
+            background: white;
+            border: 1px solid #dde5ef;
+            overflow: auto;
+            max-height: 360px;
+            margin-top: 14px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.75rem;
+            white-space: nowrap;
+        }
+
+        th {
+            background: #1f324b;
+            color: white;
+            font-weight: 500;
+            padding: 10px 12px;
+            position: sticky;
+            top: 0;
+            border-right: 1px solid #3a4e6b;
+            cursor: grab;
+            user-select: none;
+        }
+
+        th:active {
+            cursor: grabbing;
+        }
+
+        th.drag-over {
+            background: #3a5a8c;
+            outline: 2px dashed #a0c4ff;
+            outline-offset: -2px;
+        }
+
+        .th-content {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 6px;
+        }
+
+        .th-actions {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .move-col-btn {
+            background: none;
+            border: none;
+            color: #a0bbd8;
+            font-size: 1.2rem;
+            cursor: pointer;
+            padding: 4px 2px;
+            min-width: 24px;
+        }
+
+        .move-col-btn:hover {
+            color: white;
+        }
+
+        td {
+            padding: 8px 12px;
+            border-bottom: 1px solid #e2ebf3;
+        }
+
+        .action-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 16px;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .status-msg {
+            color: #2b5f9e;
+            font-size: 0.85rem;
+        }
+
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(255, 255, 255, 0.7);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 999;
+        }
+
+        .loading-spinner {
+            background: white;
+            padding: 20px 30px;
+            border-radius: 40px;
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.1);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        #deleteZeroColOptions {
+            display: none;
+            align-items: center;
+            gap: 8px;
+        }
+
+        #deleteZeroColSelect {
+            padding: 4px 8px;
+            border-radius: 20px;
+            border: 1px solid #bccfe2;
+            font-size: 0.85rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="workbench">
+        <div class="tab-nav">
+            <button class="tab-btn active" data-tab="merge">表格合并</button>
+            <button class="tab-btn" data-tab="pack">文件打包</button>
+        </div>
+        <div class="panel-container">
+            <!-- ================= 合并面板 ================= -->
+            <div id="mergePanel" class="function-panel active">
+                <div class="panel-header">
+                    <h3>表格合并 · 清洗</h3>
+                    <span class="badge">稳定版</span>
+                </div>
+                <div class="desc">
+                    上传 Excel/CSV 自动合并。拖拽文件行调整顺序，拖拽表头调整列序，双击表头编辑列名。<br>
+                    <small>导出无乱码 · 大文件后台解析不卡顿</small>
+                </div>
+
+                <!-- 上传区域 -->
+                <div id="mergeUploadZone" class="upload-zone">
+                    <div class="upload-symbol">📂</div>
+                    <div class="upload-title">点击或拖拽上传</div>
+                    <div class="upload-hint">.xlsx .xls .csv</div>
+                </div>
+                <input type="file" id="mergeFileInput" class="file-input" accept=".xlsx,.xls,.csv" multiple>
+
+                <div class="file-bar">
+                    <span class="file-stats" id="mergeFileCount">0 个表</span>
+                    <button class="btn" id="clearMergeBtn">清空</button>
+                </div>
+                <div id="mergeFileList" class="file-items">
+                    <div style="color:#8aa0bc; text-align:center;">暂无表格</div>
+                </div>
+
+                <!-- 选项行 -->
+                <div class="options-row">
+                    <div style="display:flex; gap:12px; flex-wrap:wrap;">
+                        <label><input type="radio" name="colOrder" value="appearance"> 首次出现</label>
+                        <label><input type="radio" name="colOrder" value="alphabetical"> 字母序</label>
+                        <label><input type="radio" name="colOrder" value="custom" checked> 自定义</label>
+                    </div>
+                    <label><input type="checkbox" id="keepFormulaChk"> 保留公式</label>
+                    <label><input type="checkbox" id="groupBySheetNameChk"> 分组合并</label>
+                    <label><input type="checkbox" id="addSourceColumnChk"> 来源列</label>
+                    <div id="sourceOptions" style="display:none; gap:6px;">
+                        <input type="text" id="sourceColName" value="数据来源" style="width:90px;">
+                        <select id="sourceDisplayType">
+                            <option value="filename">文件名</option>
+                            <option value="full">文件-表</option>
+                        </select>
+                    </div>
+                    <button class="btn" id="resetOrderBtn">重置列序</button>
+                </div>
+
+                <!-- 工作表选择器（分组合并时显示） -->
+                <div id="sheetSelectorContainer" style="display:none; margin:8px 0;">
+                    <select id="sheetSelector"></select>
+                    <span id="sheetStats" style="margin-left:10px;"></span>
+                </div>
+
+                <!-- 清洗面板 -->
+                <div class="clean-panel">
+                    <div style="font-weight:600; margin-bottom:8px;">清洗规则</div>
+                    <div class="clean-options">
+                        <label class="clean-check"><input type="checkbox" id="trimSpaces"> 去空格</label>
+                        <label class="clean-check"><input type="checkbox" id="textToNumberChk"> 文本型数字转数值</label>
+                        <label class="clean-check"><input type="checkbox" id="removeEmptyRows"> 删空行</label>
+                        <label class="clean-check"><input type="checkbox" id="removeDuplicates"> 去重</label>
+                    </div>
+                    <div class="clean-options">
+                        <label class="clean-check"><input type="checkbox" id="deleteZeroColChk"> 删除指定列为0的行</label>
+                        <span id="deleteZeroColOptions">
+                            <select id="deleteZeroColSelect"></select>
+                        </span>
+                    </div>
+                    <div class="row-range-row">
+                        <div class="row-range-control">
+                            <span>行范围:</span>
+                            <input type="number" id="rowStart" placeholder="起" value="1"> -
+                            <input type="number" id="rowEnd" placeholder="止">
+                        </div>
+                        <div style="display:flex; gap:8px;">
+                            <button class="btn btn-primary" id="applyCleanBtn">应用</button>
+                            <button class="btn" id="resetCleanBtn">重置</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 统计信息 -->
+                <div style="display:flex; justify-content:space-between; margin:5px 0;">
+                    <span id="mergeStats"></span>
+                    <span id="cleanStatus">原始</span>
+                </div>
+
+                <!-- 表格预览 -->
+                <div class="preview-wrapper">
+                    <div id="tablePreview" class="empty-preview">上传文件后预览</div>
+                </div>
+
+                <!-- 操作栏 -->
+                <div class="action-bar">
+                    <div id="statusMsg"></div>
+                    <button class="btn btn-primary" id="downloadMergeBtn" disabled>下载 XLSX</button>
+                </div>
+            </div>
+
+            <!-- ================= 打包面板 ================= -->
+            <div id="packPanel" class="function-panel">
+                <div class="panel-header">
+                    <h3>文件打包</h3>
+                    <span class="badge">ZIP</span>
+                </div>
+                <div class="desc">多文件打包下载</div>
+                <div id="packUploadZone" class="upload-zone">
+                    <div class="upload-symbol">📎</div>
+                    <div class="upload-title">点击或拖拽上传</div>
+                </div>
+                <input type="file" id="packFileInput" class="file-input" multiple>
+                <div class="file-bar">
+                    <span class="file-stats" id="packFileCount">0 个文件</span>
+                    <button class="btn" id="clearPackBtn">清空</button>
+                </div>
+                <div id="packFileList" class="file-items"></div>
+                <div style="display:flex; gap:10px; margin-top:16px;">
+                    <input type="text" id="zipNameInput" placeholder="名称" value="打包文件" style="flex:1; padding:8px; border-radius:30px; border:1px solid #ccc;">
+                    <button class="btn btn-primary" id="downloadZipBtn" disabled>下载 ZIP</button>
+                </div>
+                <span id="packStatus"></span>
+            </div>
+        </div>
+    </div>
+
+    <!-- 加载遮罩 -->
+    <div id="loadingOverlay" class="loading-overlay" style="display:none;">
+        <div class="loading-spinner"><span>⏳</span> 正在处理，请稍候...</div>
+    </div>
+
+    <script>
+        (function() {
+            "use strict";
+
+            // ========== 检测触屏设备（决定文件列表用按钮还是拖拽） ==========
+            const isTouchDevice = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0) || (navigator
+                .msMaxTouchPoints > 0);
+
+            // ========== 标签页切换 ==========
+            const tabs = document.querySelectorAll('.tab-btn');
+            const panels = {
+                merge: document.getElementById('mergePanel'),
+                pack: document.getElementById('packPanel')
+            };
+            tabs.forEach(t => t.addEventListener('click', () => {
+                const target = t.dataset.tab;
+                tabs.forEach(b => b.classList.remove('active'));
+                t.classList.add('active');
+                Object.keys(panels).forEach(id => panels[id].classList.toggle('active', id ===
+                target));
+            }));
+
+            const loadingOverlay = document.getElementById('loadingOverlay');
+
+            function showLoading(show) {
+                loadingOverlay.style.display = show ? 'flex' : 'none';
+            }
+
+            // ========== Web Worker（仅用于解析 Excel，避免主线程卡顿） ==========
+            function createParseWorker() {
+                const workerCode = `
+                    importScripts('https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js');
+                    self.onmessage = function(e) {
+                        const { fileBuffer, fileName } = e.data;
+                        try {
+                            const wb = XLSX.read(new Uint8Array(fileBuffer), { type: 'array', cellFormula: true });
+                            const sheets = [];
+                            wb.SheetNames.forEach(name => {
+                                const sheet = wb.Sheets[name];
+                                const data = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+                                if (!data.length) return;
+                                const rawHeaders = data[0] || [];
+                                const headers = rawHeaders.map((h,i) => String(h||'').trim() || 'Column_'+(i+1));
+                                const rows = [], fRows = [];
+                                let hasF = false;
+                                const formulaMap = {};
+                                if (sheet['!ref']) {
+                                    const range = XLSX.utils.decode_range(sheet['!ref']);
+                                    for (let R = range.s.r; R <= range.e.r; R++) {
+                                        for (let C = range.s.c; C <= range.e.c; C++) {
+                                            const addr = XLSX.utils.encode_cell({r:R, c:C});
+                                            if (sheet[addr] && sheet[addr].f) formulaMap[addr] = sheet[addr].f;
+                                        }
+                                    }
+                                }
+                                for (let R = 1; R < data.length; R++) {
+                                    const row = data[R];
+                                    if (!row) continue;
+                                    const rowVals = [], rowFs = [];
+                                    let hasContent = false;
+                                    for (let C = 0; C < headers.length; C++) {
+                                        let val = row[C];
+                                        val = val === undefined || val === null ? '' : String(val);
+                                        if (val.trim() !== '') hasContent = true;
+                                        rowVals.push(val);
+                                        const addr = XLSX.utils.encode_cell({r:R, c:C});
+                                        rowFs.push(formulaMap[addr] || null);
+                                        if (formulaMap[addr]) hasF = true;
+                                    }
+                                    if (hasContent) { rows.push(rowVals); fRows.push(rowFs); }
+                                }
+                                if (rows.length) sheets.push({ sourceFileName: fileName, sheetName: name, headers, rows, fRows, hasF });
+                            });
+                            self.postMessage({ success: true, sheets });
+                        } catch (err) { self.postMessage({ success: false, error: err.message }); }
+                        self.close();
+                    };
+                `;
+                const blob = new Blob([workerCode], { type: 'application/javascript' });
+                return new Worker(URL.createObjectURL(blob));
+            }
+
+            // ========== 合并模块全局变量 ==========
+            let filesData = []; // 所有文件/工作表的数据
+            let mergedColumns = []; // 当前显示的列
+            let originalRows = []; // 原始合并行（对象数组）
+            let mergedRows = []; // 清洗后的行
+            let mergedFormulas = []; // 对应的公式
+            let nextId = 0; // 文件唯一ID
+            let customOrder = []; // 自定义列序
+            let isClean = false;
+            let groupBySheet = false;
+            let sheetGroups = {}; // 分组数据 { sheetName: { ... } }
+            let currentSheetName = null;
+
+            let addSourceColumn = false;
+            let sourceColName = '数据来源';
+            let sourceDisplayType = 'filename';
+
+            // ========== DOM 元素引用 ==========
+            const mergeZone = document.getElementById('mergeUploadZone');
+            const mergeInput = document.getElementById('mergeFileInput');
+            const mergeFileListDiv = document.getElementById('mergeFileList');
+            const mergeCountSpan = document.getElementById('mergeFileCount');
+            const clearMergeBtn = document.getElementById('clearMergeBtn');
+            const tablePreview = document.getElementById('tablePreview');
+            const mergeStats = document.getElementById('mergeStats');
+            const statusMsg = document.getElementById('statusMsg');
+            const downloadMergeBtn = document.getElementById('downloadMergeBtn');
+            const cleanStatusSpan = document.getElementById('cleanStatus');
+            const resetOrderBtn = document.getElementById('resetOrderBtn');
+            const keepFormulaChk = document.getElementById('keepFormulaChk');
+            const groupBySheetChk = document.getElementById('groupBySheetNameChk');
+            const addSourceColumnChk = document.getElementById('addSourceColumnChk');
+            const sourceOptionsDiv = document.getElementById('sourceOptions');
+            const sourceColNameInput = document.getElementById('sourceColName');
+            const sourceDisplaySelect = document.getElementById('sourceDisplayType');
+            const radioAppearance = document.querySelector('input[value="appearance"]');
+            const radioAlpha = document.querySelector('input[value="alphabetical"]');
+            const radioCustom = document.querySelector('input[value="custom"]');
+            const sheetSelectorContainer = document.getElementById('sheetSelectorContainer');
+            const sheetSelector = document.getElementById('sheetSelector');
+            const sheetStats = document.getElementById('sheetStats');
+            const trimChk = document.getElementById('trimSpaces');
+            const textToNumberChk = document.getElementById('textToNumberChk');
+            const removeEmptyChk = document.getElementById('removeEmptyRows');
+            const removeDupChk = document.getElementById('removeDuplicates');
+            const deleteZeroColChk = document.getElementById('deleteZeroColChk');
+            const deleteZeroColSelect = document.getElementById('deleteZeroColSelect');
+            const deleteZeroColOptions = document.getElementById('deleteZeroColOptions');
+            const rowStart = document.getElementById('rowStart');
+            const rowEnd = document.getElementById('rowEnd');
+            const applyCleanBtn = document.getElementById('applyCleanBtn');
+            const resetCleanBtn = document.getElementById('resetCleanBtn');
+
+            // ========== 工具函数 ==========
+            function escapeHtml(t) {
+                const d = document.createElement('div');
+                d.textContent = t;
+                return d.innerHTML;
+            }
+
+            function setStatus(text) {
+                statusMsg.textContent = text || '';
+            }
+
+            // ========== 事件监听（选项变化自动重建） ==========
+            addSourceColumnChk.addEventListener('change', () => {
+                addSourceColumn = addSourceColumnChk.checked;
+                sourceOptionsDiv.style.display = addSourceColumn ? 'flex' : 'none';
+                rebuildMerge();
+            });
+            sourceColNameInput.addEventListener('change', () => {
+                sourceColName = sourceColNameInput.value.trim() || '数据来源';
+                rebuildMerge();
+            });
+            sourceDisplaySelect.addEventListener('change', () => {
+                sourceDisplayType = sourceDisplaySelect.value;
+                rebuildMerge();
+            });
+            deleteZeroColChk.addEventListener('change', () => {
+                deleteZeroColOptions.style.display = deleteZeroColChk.checked ? 'inline-flex' : 'none';
+                updateDeleteColSelectOptions();
+            });
+
+            // ========== 文件列表渲染（支持拖拽或按钮排序） ==========
+            function renderFileList() {
+                if (!filesData.length) {
+                    mergeFileListDiv.innerHTML =
+                        '<div style="color:#8aa0bc;text-align:center;">暂无表格</div>';
+                    mergeCountSpan.textContent = '0 个表';
+                    return;
+                }
+                mergeCountSpan.textContent = `${filesData.length} 个表`;
+                let html = '';
+                filesData.forEach((f, i) => {
+                    const name = f.sheetName ? `${f.sourceFileName} — ${f.sheetName}` : f
+                    .sourceFileName;
+                    html += `
+                    <div class="file-row ${isTouchDevice ? '' : 'draggable'}" data-index="${i}">
+                        <span class="file-info">${escapeHtml(name)} (${f.headers.length}列)</span>
+                        <div class="file-actions">
+                            ${isTouchDevice ? `
+                                <button class="move-btn up-btn" data-index="${i}" ${i===0 ? 'disabled' : ''}>▲</button>
+                                <button class="move-btn down-btn" data-index="${i}" ${i===filesData.length-1 ? 'disabled' : ''}>▼</button>
+                            ` : ''}
+                            <button class="remove-btn" data-id="${f.id}">✕</button>
+                        </div>
+                    </div>`;
+                });
+                mergeFileListDiv.innerHTML = html;
+
+                // 删除按钮事件
+                document.querySelectorAll('#mergeFileList .remove-btn').forEach(b => {
+                    b.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        filesData = filesData.filter(f => f.id !== Number(b.dataset.id));
+                        renderFileList();
+                        rebuildMerge();
+                    });
+                });
+
+                // 桌面拖拽排序
+                if (!isTouchDevice) {
+                    let draggedIdx = null;
+                    document.querySelectorAll('#mergeFileList .file-row').forEach(row => {
+                        row.addEventListener('dragstart', (e) => {
+                            draggedIdx = parseInt(row.dataset.index);
+                            row.style.opacity = '0.5';
+                        });
+                        row.addEventListener('dragover', (e) => {
+                            e.preventDefault();
+                            const targetIdx = parseInt(row.dataset.index);
+                            if (targetIdx !== draggedIdx) row.classList.add('drag-over');
+                        });
+                        row.addEventListener('dragleave', () => row.classList.remove(
+                            'drag-over'));
+                        row.addEventListener('drop', (e) => {
+                            e.preventDefault();
+                            row.classList.remove('drag-over');
+                            const targetIdx = parseInt(row.dataset.index);
+                            if (draggedIdx !== null && targetIdx !== draggedIdx) {
+                                const moved = filesData.splice(draggedIdx, 1)[0];
+                                filesData.splice(targetIdx, 0, moved);
+                                renderFileList();
+                                rebuildMerge();
+                                setStatus('文件顺序已更新');
+                            }
+                            draggedIdx = null;
+                        });
+                        row.addEventListener('dragend', () => {
+                            row.style.opacity = '1';
+                            document.querySelectorAll('#mergeFileList .file-row').forEach(
+                                r => r.classList.remove('drag-over'));
+                            draggedIdx = null;
+                        });
+                    });
+                } else {
+                    // 移动端按钮排序
+                    document.querySelectorAll('.up-btn').forEach(b => {
+                        b.addEventListener('click', (e) => {
+                            e.stopPropagation();
+                            const idx = parseInt(b.dataset.index);
+                            if (idx > 0) {
+                                [filesData[idx - 1], filesData[idx]] = [filesData[idx],
+                                    filesData[idx - 1]
+                                ];
+                                renderFileList();
+                                rebuildMerge();
+                                setStatus('文件已上移');
+                            }
+                        });
+                    });
+                    document.querySelectorAll('.down-btn').forEach(b => {
+                        b.addEventListener('click', (e) => {
+                            e.stopPropagation();
+                            const idx = parseInt(b.dataset.index);
+                            if (idx < filesData.length - 1) {
+                                [filesData[idx], filesData[idx + 1]] = [filesData[idx + 1],
+                                    filesData[idx]
+                                ];
+                                renderFileList();
+                                rebuildMerge();
+                                setStatus('文件已下移');
+                            }
+                        });
+                    });
+                }
+            }
+
+            // ========== 合并核心逻辑 ==========
+            function getAppearanceOrder(sheets) {
+                const order = [],
+                    seen = new Set();
+                sheets.forEach(sh => sh.headers.forEach(h => {
+                    if (!seen.has(h)) { seen.add(h);
+                        order.push(h); }
+                }));
+                return order;
+            }
+
+            function generateSourceValue(sheetInfo) {
+                return sourceDisplayType === 'filename' ? sheetInfo.sourceFileName :
+                    `${sheetInfo.sourceFileName} - ${sheetInfo.sheetName}`;
+            }
+
+            function rebuildMerge() {
+                groupBySheet = groupBySheetChk.checked;
+                addSourceColumn = addSourceColumnChk.checked;
+                sourceColName = sourceColNameInput.value.trim() || '数据来源';
+
+                if (!filesData.length) {
+                    sheetGroups = {};
+                    currentSheetName = null;
+                    mergedColumns = [];
+                    originalRows = [];
+                    mergedRows = [];
+                    mergedFormulas = [];
+                    updatePreview();
+                    updateSheetSelector();
+                    return;
+                }
+
+                if (!groupBySheet) {
+                    const allSheets = filesData;
+                    const appearance = getAppearanceOrder(allSheets);
+                    const allHeadersSet = new Set(appearance);
+                    let baseOrder;
+                    if (radioAppearance.checked) {
+                        baseOrder = [...appearance];
+                    } else if (radioAlpha.checked) {
+                        baseOrder = [...appearance].sort((a, b) => a.localeCompare(b, 'zh-CN', { numeric: true }));
+                    } else {
+                        // 自定义模式：过滤掉不存在的列
+                        customOrder = customOrder.filter(c => allHeadersSet.has(c));
+                        if (!customOrder.length) customOrder = [...appearance];
+                        baseOrder = customOrder;
+                    }
+                    const finalColumns = addSourceColumn ? [sourceColName, ...baseOrder] : baseOrder;
+                    mergedColumns = finalColumns;
+
+                    const rows = [],
+                        fRows = [];
+                    for (const sheet of allSheets) {
+                        const map = {};
+                        sheet.headers.forEach((h, i) => map[h] = i);
+                        const srcVal = generateSourceValue(sheet);
+                        for (let ri = 0; ri < sheet.rows.length; ri++) {
+                            const row = sheet.rows[ri],
+                                fRow = sheet.fRows[ri];
+                            const obj = {},
+                                fObj = {};
+                            if (addSourceColumn) obj[sourceColName] = srcVal;
+                            for (const c of baseOrder) {
+                                const idx = map[c];
+                                obj[c] = idx !== undefined ? row[idx] : '';
+                                fObj[c] = (fRow && fRow[idx]) || null;
+                            }
+                            rows.push(obj);
+                            fRows.push(fObj);
+                        }
+                    }
+                    originalRows = rows;
+                    mergedFormulas = fRows;
+                    mergedRows = [...rows];
+                    isClean = false;
+                    cleanStatusSpan.textContent = '原始';
+                    sheetGroups = {};
+                } else {
+                    // 分组模式
+                    const groups = {};
+                    filesData.forEach(s => {
+                        if (!groups[s.sheetName]) groups[s.sheetName] = [];
+                        groups[s.sheetName].push(s);
+                    });
+                    sheetGroups = {};
+                    for (const name of Object.keys(groups)) {
+                        const sheets = groups[name];
+                        const appearance = getAppearanceOrder(sheets);
+                        const allHeadersSet = new Set(appearance);
+                        let baseOrder;
+                        if (radioAppearance.checked) {
+                            baseOrder = [...appearance];
+                        } else if (radioAlpha.checked) {
+                            baseOrder = [...appearance].sort((a, b) => a.localeCompare(b, 'zh-CN'));
+                        } else {
+                            const g = sheetGroups[name] || {};
+                            g.customOrder = (g.customOrder || []).filter(c => allHeadersSet.has(c));
+                            if (!g.customOrder.length) g.customOrder = [...appearance];
+                            baseOrder = g.customOrder;
+                        }
+                        const finalColumns = addSourceColumn ? [sourceColName, ...baseOrder] : baseOrder;
+                        const rows = [],
+                            fRows = [];
+                        for (const sheet of sheets) {
+                            const map = {};
+                            sheet.headers.forEach((h, i) => map[h] = i);
+                            const srcVal = generateSourceValue(sheet);
+                            for (let ri = 0; ri < sheet.rows.length; ri++) {
+                                const row = sheet.rows[ri],
+                                    fRow = sheet.fRows[ri];
+                                const obj = {},
+                                    fObj = {};
+                                if (addSourceColumn) obj[sourceColName] = srcVal;
+                                for (const c of baseOrder) {
+                                    const idx = map[c];
+                                    obj[c] = idx !== undefined ? row[idx] : '';
+                                    fObj[c] = (fRow && fRow[idx]) || null;
+                                }
+                                rows.push(obj);
+                                fRows.push(fObj);
+                            }
+                        }
+                        sheetGroups[name] = {
+                            customOrder: baseOrder,
+                            columns: finalColumns,
+                            baseColumns: baseOrder,
+                            originalRows: rows,
+                            mergedRows: [...rows],
+                            formulas: fRows,
+                            isClean: false
+                        };
+                    }
+                    currentSheetName = Object.keys(sheetGroups)[0];
+                    loadCurrentSheetData();
+                    updateSheetSelector();
+                }
+                updatePreview();
+            }
+
+            function loadCurrentSheetData() {
+                if (!groupBySheet || !currentSheetName || !sheetGroups[currentSheetName]) return;
+                const g = sheetGroups[currentSheetName];
+                mergedColumns = g.columns;
+                originalRows = g.originalRows;
+                mergedRows = g.mergedRows;
+                mergedFormulas = g.formulas;
+                isClean = g.isClean;
+                cleanStatusSpan.textContent = isClean ? '已清洗' : '原始';
+            }
+
+            function updateSheetSelector() {
+                if (groupBySheet && Object.keys(sheetGroups).length) {
+                    sheetSelectorContainer.style.display = 'block';
+                    sheetSelector.innerHTML = '';
+                    Object.keys(sheetGroups).forEach(name => {
+                        const opt = document.createElement('option');
+                        opt.value = name;
+                        opt.textContent = name;
+                        sheetSelector.appendChild(opt);
+                    });
+                    sheetSelector.value = currentSheetName;
+                    sheetStats.textContent = `${Object.keys(sheetGroups).length} 个工作表`;
+                } else {
+                    sheetSelectorContainer.style.display = 'none';
+                }
+            }
+            sheetSelector.addEventListener('change', () => {
+                currentSheetName = sheetSelector.value;
+                loadCurrentSheetData();
+                updatePreview();
+            });
+
+            function updateDeleteColSelectOptions() {
+                const sel = deleteZeroColSelect;
+                const cur = sel.value;
+                sel.innerHTML = '';
+                const cols = mergedColumns.filter(c => !(addSourceColumn && c === sourceColName));
+                cols.forEach(c => {
+                    const opt = document.createElement('option');
+                    opt.value = c;
+                    opt.textContent = c;
+                    sel.appendChild(opt);
+                });
+                if (cols.includes(cur)) sel.value = cur;
+                else if (cols.length) sel.value = cols[0];
+            }
+
+            // ========== 清洗逻辑 ==========
+            function applyCleaning() {
+                const rows = originalRows;
+                if (!rows.length) return;
+                const start = Math.max(0, (parseInt(rowStart.value) || 1) - 1);
+                const end = rowEnd.value ? Math.min(rows.length - 1, parseInt(rowEnd.value) - 1) : rows.length - 1;
+
+                let cleaned = rows.map((r, idx) => {
+                    if (idx < start || idx > end) return { ...r };
+                    const newRow = {};
+                    Object.keys(r).forEach(c => {
+                        let v = r[c];
+                        if (trimChk.checked && typeof v === 'string') v = v.trim();
+                        newRow[c] = v;
+                    });
+                    return newRow;
+                });
+
+                if (textToNumberChk.checked) {
+                    cleaned = cleaned.map((row, idx) => {
+                        if (idx < start || idx > end) return row;
+                        const newRow = { ...row };
+                        Object.keys(newRow).forEach(c => {
+                            let val = newRow[c];
+                            if (typeof val === 'string') {
+                                const t = val.trim();
+                                if (t !== '' && !isNaN(t) && isFinite(t)) newRow[c] = Number(t);
+                            }
+                        });
+                        return newRow;
+                    });
+                }
+
+                if (deleteZeroColChk.checked && deleteZeroColSelect.value) {
+                    const col = deleteZeroColSelect.value;
+                    cleaned = cleaned.filter(row => !(row[col] === 0 || row[col] === '0'));
+                }
+
+                if (removeEmptyChk.checked) {
+                    cleaned = cleaned.filter((r, idx) => idx < start || idx > end || Object.values(r).some(v =>
+                        v !== '' && v !== null && v !== undefined));
+                }
+
+                if (removeDupChk.checked) {
+                    const seen = new Set();
+                    cleaned = cleaned.filter(r => {
+                        const key = mergedColumns.map(c => r[c] == null ? '' : String(r[c])).join('|');
+                        if (seen.has(key)) return false;
+                        seen.add(key);
+                        return true;
+                    });
+                }
+
+                if (groupBySheet && currentSheetName) {
+                    sheetGroups[currentSheetName].mergedRows = cleaned;
+                    sheetGroups[currentSheetName].isClean = true;
+                } else {
+                    mergedRows = cleaned;
+                    isClean = true;
+                }
+                loadCurrentSheetData();
+                updatePreview();
+                setStatus('清洗完成');
+            }
+
+            function resetCleaning() {
+                if (groupBySheet && currentSheetName) {
+                    sheetGroups[currentSheetName].mergedRows = [...sheetGroups[currentSheetName].originalRows];
+                    sheetGroups[currentSheetName].isClean = false;
+                } else {
+                    mergedRows = [...originalRows];
+                    isClean = false;
+                }
+                loadCurrentSheetData();
+                updatePreview();
+                setStatus('已重置');
+            }
+
+            // ========== 列拖拽交换 ==========
+            function swapColumns(col1, col2) {
+                if (!radioCustom.checked) {
+                    radioCustom.checked = true;
+                    if (groupBySheet && currentSheetName) {
+                        const g = sheetGroups[currentSheetName];
+                        g.customOrder = [...g.columns.filter(c => !addSourceColumn || c !== sourceColName)];
+                    } else {
+                        customOrder = [...mergedColumns.filter(c => !addSourceColumn || c !== sourceColName)];
+                    }
+                }
+                const order = (groupBySheet && currentSheetName) ?
+                    sheetGroups[currentSheetName].customOrder : customOrder;
+                const idx1 = order.indexOf(col1),
+                    idx2 = order.indexOf(col2);
+                if (idx1 === -1 || idx2 === -1 || idx1 === idx2) return;
+                [order[idx1], order[idx2]] = [order[idx2], order[idx1]];
+                rebuildMerge();
+                setStatus(`列序已交换：${col1} ↔ ${col2}`);
+            }
+
+            // ========== 表格预览 ==========
+            function updatePreview() {
+                if (!mergedRows.length || !mergedColumns.length) {
+                    tablePreview.innerHTML = '<div class="empty-preview">暂无数据</div>';
+                    downloadMergeBtn.disabled = true;
+                    updateDeleteColSelectOptions();
+                    return;
+                }
+                const maxR = 100,
+                    preview = mergedRows.slice(0, maxR);
+                let html = '<table><thead><tr>';
+                mergedColumns.forEach(c => {
+                    html += `<th draggable="true" data-col="${escapeHtml(c)}" class="draggable-col">
+                        <div class="th-content">
+                            <span>${escapeHtml(c)}</span>
+                            <div class="th-actions">
+                                <button class="move-col-btn" data-col="${escapeHtml(c)}" data-dir="delete" title="删除列">✖</button>
+                                <button class="move-col-btn" data-col="${escapeHtml(c)}" data-dir="edit" title="编辑列名">✎</button>
+                            </div>
+                        </div>
+                    </th>`;
+                });
+                html += '</tr></thead><tbody>';
+                preview.forEach(r => {
+                    html += '<tr>';
+                    mergedColumns.forEach(c => html +=
+                        `<td>${escapeHtml(r[c] == null ? '' : String(r[c]))}</td>`);
+                    html += '</tr>';
+                });
+                html += '</tbody></table>';
+                if (mergedRows.length > maxR) html +=
+                    '<div style="padding:8px;text-align:center;">仅展示前 100 行</div>';
+                tablePreview.innerHTML = html;
+                mergeStats.textContent = `${mergedColumns.length} 列 · ${mergedRows.length} 行`;
+                downloadMergeBtn.disabled = false;
+
+                // 列拖拽事件
+                let draggedCol = null;
+                document.querySelectorAll('.draggable-col').forEach(th => {
+                    th.addEventListener('dragstart', (e) => {
+                        draggedCol = th.dataset.col;
+                        th.style.opacity = '0.5';
+                    });
+                    th.addEventListener('dragover', (e) => {
+                        e.preventDefault();
+                        if (th.dataset.col !== draggedCol) th.classList.add('drag-over');
+                    });
+                    th.addEventListener('dragleave', () => th.classList.remove('drag-over'));
+                    th.addEventListener('drop', (e) => {
+                        e.preventDefault();
+                        th.classList.remove('drag-over');
+                        if (draggedCol && th.dataset.col && draggedCol !== th.dataset.col)
+                            swapColumns(draggedCol, th.dataset.col);
+                        draggedCol = null;
+                    });
+                    th.addEventListener('dragend', () => {
+                        th.style.opacity = '1';
+                        document.querySelectorAll('.draggable-col').forEach(t => t.classList
+                            .remove('drag-over'));
+                        draggedCol = null;
+                    });
+                });
+
+                // 列名编辑与删除按钮
+                document.querySelectorAll('.move-col-btn').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        const col = btn.dataset.col;
+                        if (btn.dataset.dir === 'delete') {
+                            if (confirm(`确定删除列 "${col}" 吗？`)) deleteColumn(col);
+                        } else if (btn.dataset.dir === 'edit') {
+                            editColumnName(col);
+                        }
+                    });
+                });
+
+                updateDeleteColSelectOptions();
+            }
+
+            function deleteColumn(colName) {
+                let cols = mergedColumns,
+                    base = addSourceColumn ? customOrder : mergedColumns;
+                if (groupBySheet && currentSheetName) {
+                    cols = sheetGroups[currentSheetName].columns;
+                    base = sheetGroups[currentSheetName].customOrder;
+                }
+                if (cols.length <= 1) { setStatus('至少保留一列'); return; }
+                const newCols = cols.filter(c => c !== colName);
+                const newBase = base.filter(c => c !== colName);
+
+                if (!groupBySheet) {
+                    mergedColumns = newCols;
+                    customOrder = newBase;
+                    originalRows = originalRows.map(r => { const nr = {};
+                        newCols.forEach(c => nr[c] = r[c]); return nr; });
+                    mergedRows = mergedRows.map(r => { const nr = {};
+                        newCols.forEach(c => nr[c] = r[c]); return nr; });
+                } else {
+                    const g = sheetGroups[currentSheetName];
+                    g.columns = newCols;
+                    g.customOrder = newBase;
+                    g.baseColumns = newBase;
+                    g.originalRows = g.originalRows.map(r => { const nr = {};
+                        newCols.forEach(c => nr[c] = r[c]); return nr; });
+                    g.mergedRows = g.mergedRows.map(r => { const nr = {};
+                        newCols.forEach(c => nr[c] = r[c]); return nr; });
+                    loadCurrentSheetData();
+                }
+                updatePreview();
+                setStatus(`已删除列 "${colName}"`);
+            }
+
+            function editColumnName(oldName) {
+                const newName = prompt('请输入新列名', oldName);
+                if (!newName || newName === oldName) return;
+                const trimName = newName.trim();
+                if (mergedColumns.includes(trimName) && trimName !== oldName) {
+                    alert('列名已存在');
+                    return;
+                }
+                const idx = mergedColumns.indexOf(oldName);
+                if (idx !== -1) mergedColumns[idx] = trimName;
+                if (addSourceColumn && oldName === sourceColName) sourceColName = trimName;
+
+                // 同步 customOrder
+                const updateOrder = (order) => { const i = order.indexOf(oldName); if (i !== -1) order[i] =
+                        trimName; };
+                if (!groupBySheet) updateOrder(customOrder);
+                else if (currentSheetName) updateOrder(sheetGroups[currentSheetName].customOrder);
+
+                const rename = (rows) => rows.map(r => { const nr = {};
+                    Object.keys(r).forEach(k => nr[k === oldName ? trimName : k] = r[k]); return nr; });
+                originalRows = rename(originalRows);
+                mergedRows = rename(mergedRows);
+                mergedFormulas = mergedFormulas.map(f => { const nf = {};
+                    Object.keys(f).forEach(k => nf[k === oldName ? trimName : k] = f[k]); return nf; });
+                if (groupBySheet && currentSheetName) {
+                    const g = sheetGroups[currentSheetName];
+                    g.originalRows = rename(g.originalRows);
+                    g.mergedRows = rename(g.mergedRows);
+                    g.formulas = g.formulas.map(f => { const nf = {};
+                        Object.keys(f).forEach(k => nf[k === oldName ? trimName : k] = f[k]); return nf; });
+                }
+                updatePreview();
+                setStatus(`列名已更新：${oldName} → ${trimName}`);
+            }
+
+            // ========== 导出 Excel（主线程，修复乱码） ==========
+            function downloadMerged() {
+                if (!mergedRows.length) { setStatus('无数据可导出'); return; }
+                showLoading(true);
+                setStatus('正在生成文件...');
+                try {
+                    const keep = keepFormulaChk.checked;
+                    const wb = XLSX.utils.book_new();
+
+                    const createSheet = (cols, rows, formulas) => {
+                        const data = [cols];
+                        rows.forEach(r => data.push(cols.map(c => r[c] == null ? '' : r[c])));
+                        const ws = XLSX.utils.aoa_to_sheet(data);
+                        // 写入公式
+                        if (keep) {
+                            formulas.forEach((fRow, ri) => {
+                                cols.forEach((c, ci) => {
+                                    if (fRow[c]) {
+                                        const addr = XLSX.utils.encode_cell({ r: ri + 1, c: ci });
+                                        if (!ws[addr]) ws[addr] = {};
+                                        ws[addr].f = fRow[c];
+                                    }
+                                });
+                            });
+                        }
+                        // 防止长数字变成科学计数法
+                        if (textToNumberChk.checked) {
+                            const range = XLSX.utils.decode_range(ws['!ref']);
+                            for (let R = range.s.r + 1; R <= range.e.r; R++) {
+                                for (let C = range.s.c; C <= range.e.c; C++) {
+                                    const addr = XLSX.utils.encode_cell({ r: R, c: C });
+                                    const cell = ws[addr];
+                                    if (!cell || cell.t === 's') continue;
+                                    const v = cell.v;
+                                    if (typeof v === 'number' && !isNaN(v)) {
+                                        const s = v.toString();
+                                        if (s.length > 15 || s.includes('e') || s.includes('E')) {
+                                            cell.t = 's';
+                                            cell.v = s;
+                                            delete cell.z;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        return ws;
+                    };
+
+                    if (groupBySheet && Object.keys(sheetGroups).length) {
+                        Object.entries(sheetGroups).forEach(([name, g]) => {
+                            let safeName = name.substring(0, 31);
+                            let counter = 1;
+                            while (wb.SheetNames.includes(safeName)) {
+                                safeName = name.substring(0, 28) + '_' + counter++;
+                            }
+                            XLSX.utils.book_append_sheet(wb, createSheet(g.columns, g.mergedRows, g
+                                .formulas), safeName);
+                        });
+                    } else {
+                        XLSX.utils.book_append_sheet(wb, createSheet(mergedColumns, mergedRows,
+                            mergedFormulas), '合并结果');
+                    }
+
+                    // 生成文件并下载（修复乱码关键：array → Uint8Array）
+                    const wboutArray = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
+                    const blob = new Blob([new Uint8Array(wboutArray)], {
+                        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                    });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `合并表格_${Date.now()}.xlsx`;
+                    document.body.appendChild(a);
+                    a.click();
+                    setTimeout(() => {
+                        document.body.removeChild(a);
+                        URL.revokeObjectURL(url);
+                    }, 100);
+                    setStatus('下载完成');
+                } catch (e) {
+                    setStatus('导出失败：' + e.message);
+                } finally {
+                    showLoading(false);
+                }
+            }
+
+            // ========== 文件解析（使用 Worker） ==========
+            async function parseFileWithWorker(file) {
+                return new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = () => {
+                        const buffer = reader.result;
+                        const worker = createParseWorker();
+                        worker.onmessage = (e) => {
+                            if (e.data.success) resolve(e.data.sheets);
+                            else reject(new Error(e.data.error));
+                            worker.terminate();
+                        };
+                        worker.onerror = (err) => { reject(err);
+                            worker.terminate(); };
+                        worker.postMessage({ fileBuffer: buffer, fileName: file.name }, [buffer]);
+                    };
+                    reader.onerror = () => reject(new Error('文件读取失败'));
+                    reader.readAsArrayBuffer(file);
+                });
+            }
+
+            async function addMergeFiles(files) {
+                if (!files.length) return;
+                showLoading(true);
+                setStatus('后台解析中...');
+                let added = 0,
+                    errors = 0;
+                for (const file of files) {
+                    try {
+                        const sheets = await parseFileWithWorker(file);
+                        sheets.forEach(s => {
+                            filesData.push({ id: nextId++, ...s });
+                            added++;
+                        });
+                    } catch (e) { errors++;
+                        console.warn(e); }
+                }
+                showLoading(false);
+                if (added) {
+                    renderFileList();
+                    rebuildMerge();
+                    setStatus(`已添加 ${added} 个表${errors ? `，${errors} 失败` : ''}`);
+                } else {
+                    setStatus('未读取到有效表格');
+                }
+            }
+
+            // ========== 上传事件 ==========
+            mergeZone.addEventListener('click', () => mergeInput.click());
+            mergeZone.addEventListener('dragover', e => e.preventDefault());
+            mergeZone.addEventListener('drop', e => {
+                e.preventDefault();
+                addMergeFiles(Array.from(e.dataTransfer.files));
+            });
+            mergeInput.addEventListener('change', e => {
+                addMergeFiles(Array.from(e.target.files));
+                mergeInput.value = '';
+            });
+            clearMergeBtn.addEventListener('click', () => {
+                filesData = [];
+                renderFileList();
+                rebuildMerge();
+            });
+            radioAppearance.addEventListener('change', rebuildMerge);
+            radioAlpha.addEventListener('change', rebuildMerge);
+            radioCustom.addEventListener('change', rebuildMerge);
+            groupBySheetChk.addEventListener('change', rebuildMerge);
+            resetOrderBtn.addEventListener('click', () => {
+                customOrder = getAppearanceOrder(filesData);
+                rebuildMerge();
+            });
+            applyCleanBtn.addEventListener('click', applyCleaning);
+            resetCleanBtn.addEventListener('click', resetCleaning);
+            downloadMergeBtn.addEventListener('click', downloadMerged);
+
+            // ========== 打包模块（简化，保持原有逻辑） ==========
+            let packFiles = [];
+            const packZone = document.getElementById('packUploadZone');
+            const packInput = document.getElementById('packFileInput');
+            const packList = document.getElementById('packFileList');
+            const packCount = document.getElementById('packFileCount');
+            const clearPackBtn = document.getElementById('clearPackBtn');
+            const zipNameInput = document.getElementById('zipNameInput');
+            const downloadZipBtn = document.getElementById('downloadZipBtn');
+            const packStatusSpan = document.getElementById('packStatus');
+
+            function renderPack() {
+                if (!packFiles.length) {
+                    packList.innerHTML = '<div style="color:#8aa0bc;text-align:center;">暂无文件</div>';
+                    packCount.textContent = '0 个文件';
+                    downloadZipBtn.disabled = true;
+                    return;
+                }
+                packCount.textContent = `${packFiles.length} 个文件`;
+                let html = '';
+                packFiles.forEach((f, i) => {
+                    html +=
+                        `<div class="file-row"><span>${escapeHtml(f.name)}</span><button class="remove-btn" data-index="${i}">✕</button></div>`;
+                });
+                packList.innerHTML = html;
+                document.querySelectorAll('#packFileList .remove-btn').forEach(b => {
+                    b.addEventListener('click', () => {
+                        packFiles.splice(Number(b.dataset.index), 1);
+                        renderPack();
+                    });
+                });
+                downloadZipBtn.disabled = false;
+            }
+
+            packZone.addEventListener('click', () => packInput.click());
+            packZone.addEventListener('drop', e => {
+                e.preventDefault();
+                packFiles.push(...Array.from(e.dataTransfer.files));
+                renderPack();
+            });
+            packInput.addEventListener('change', e => {
+                packFiles.push(...Array.from(e.target.files));
+                renderPack();
+                packInput.value = '';
+            });
+            clearPackBtn.addEventListener('click', () => { packFiles = [];
+                renderPack(); });
+            downloadZipBtn.addEventListener('click', async () => {
+                if (!packFiles.length) return;
+                const zip = new JSZip();
+                packFiles.forEach(f => zip.file(f.name, f));
+                const blob = await zip.generateAsync({ type: 'blob' });
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = (zipNameInput.value.trim() || '打包文件') + '.zip';
+                a.click();
+                packStatusSpan.textContent = '打包完成';
+            });
+
+            // ========== 初始化 ==========
+            renderFileList();
+            rebuildMerge();
+        })();
+    </script>
+</body>
+</html>
